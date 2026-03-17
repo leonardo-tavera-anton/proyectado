@@ -1,0 +1,16 @@
+{
+  "name": "proyectado",
+  "version": "1.0.0",
+  "description": "Proyecto de juego online escalable",
+  "main": "server/server.js",
+  "scripts": {
+    "start": "node server/server.js",
+    "dev": "nodemon server/server.js"
+  },
+  "author": "Leonardo",
+  "license": "ISC",
+  "dependencies": {
+    "express": "^4.18.2",
+    "socket.io": "^4.7.2"
+  }
+}
