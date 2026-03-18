@@ -1,0 +1,143 @@
+<!DOCTYPE html>
+<html lang="es">
+<head>
+    <meta charset="UTF-8">
+    <title>Proyectado | Sandbox 2D</title>
+    <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
+    <script src="/socket.io/socket.io.js"></script>
+    <style>
+        body { margin: 0; display: flex; background: #121212; color: #e0e0e0; font-family: 'Segoe UI', sans-serif; height: 100vh; overflow: hidden; }
+        #sidebar { width: 280px; background: #1e1e1e; border-right: 2px solid #333; padding: 20px; display: flex; flex-direction: column; gap: 15px; z-index: 10; }
+        .auth-box { background: #252525; padding: 15px; border-radius: 8px; border: 1px solid #444; }
+        input { width: 100%; padding: 8px; margin-bottom: 10px; background: #111; border: 1px solid #555; color: white; box-sizing: border-box; }
+        button { width: 100%; padding: 10px; cursor: pointer; background: #27ae60; border: none; color: white; font-weight: bold; border-radius: 4px; transition: 0.3s; }
+        button:hover { background: #2ecc71; }
+        #canvas-container { flex-grow: 1; position: relative; background: #000; }
+        canvas { display: block; }
+        .sala-link { padding: 8px; background: #333; margin-top: 5px; border-radius: 4px; text-decoration: none; color: #3498db; font-size: 14px; display: block; }
+    </style>
+</head>
+<body>
+
+<div id="sidebar">
+    <h2>PROYECTADO</h2>
+    <div id="auth-ui" class="auth-box">
+        <input type="email" id="email" placeholder="Correo">
+        <input type="password" id="pass" placeholder="Contraseña">
+        <button onclick="handleAuth('login')">Entrar</button>
+        <button onclick="handleAuth('register')" style="background:#2980b9; margin-top:5px;">Registrarse</button>
+    </div>
+    
+    <div id="user-info" style="display:none;" class="auth-box">
+        <p>Hola, <b id="user-name">...</b></p>
+        <p>Sala: <span id="current-room">general</span></p>
+        <button onclick="supabase.auth.signOut().then(()=>location.reload())" style="background:#c0392b;">Cerrar Sesión</button>
+    </div>
+
+    <hr style="width:100%; border:0; border-top:1px solid #444;">
+    <h3>Salas Activas</h3>
+    <div id="room-list"></div>
+</div>
+
+<div id="canvas-container">
+    <canvas id="gameCanvas"></canvas>
+</div>
+
+<script>
+    const SUPABASE_URL = 'TU_URL_DE_SUPABASE';
+    const SUPABASE_KEY = 'TU_LLAVE_ANON';
+    const supabase = window.supabase.createClient(SUPABASE_URL, SUPABASE_KEY);
+    const socket = io();
+
+    const canvas = document.getElementById('gameCanvas');
+    const ctx = canvas.getContext('2d');
+    let blocks = [];
+    let isDrawing = false;
+    let startX, startY;
+    let currentUser = null;
+    let currentRoom = new URLSearchParams(window.location.search).get('sala') || 'general';
+
+    // Ajustar canvas al tamaño de la ventana
+    function resize() {
+        canvas.width = window.innerWidth - 280;
+        canvas.height = window.innerHeight;
+        render();
+    }
+    window.onresize = resize;
+    resize();
+
+    // --- AUTENTICACIÓN ---
+    async function handleAuth(type) {
+        const email = document.getElementById('email').value;
+        const password = document.getElementById('pass').value;
+        const { data, error } = type === 'login' 
+            ? await supabase.auth.signInWithPassword({ email, password })
+            : await supabase.auth.signUp({ email, password });
+
+        if (error) alert(error.message);
+        else if (type === 'register') alert("¡Registrado! Revisa tu email.");
+    }
+
+    supabase.auth.onAuthStateChange((event, session) => {
+        if (session) {
+            currentUser = session.user;
+            document.getElementById('auth-ui').style.display = 'none';
+            document.getElementById('user-info').style.display = 'block';
+            document.getElementById('user-name').innerText = session.user.email.split('@')[0];
+            socket.emit('joinRoom', { room: currentRoom, user: currentUser.id });
+        }
+    });
+
+    // --- LÓGICA DE DIBUJO ---
+    canvas.onmousedown = (e) => {
+        if (!currentUser) return alert("Debes iniciar sesión para construir");
+        isDrawing = true;
+        startX = e.offsetX;
+        startY = e.offsetY;
+    };
+
+    canvas.onmousemove = (e) => {
+        if (!isDrawing) return;
+        render();
+        ctx.strokeStyle = "#ffffff";
+        ctx.lineWidth = 2;
+        ctx.strokeRect(startX, startY, e.offsetX - startX, e.offsetY - startY);
+    };
+
+    canvas.onmouseup = async (e) => {
+        if (!isDrawing) return;
+        isDrawing = false;
+        
+        const newBlock = {
+            sala_id: currentRoom,
+            autor_id: currentUser.id,
+            x: Math.min(startX, e.offsetX),
+            y: Math.min(startY, e.offsetY),
+            ancho: Math.abs(e.offsetX - startX),
+            alto: Math.abs(e.offsetY - startY),
+            color: '#3498db' // El color vendrá del perfil en el servidor
+        };
+
+        if (newBlock.ancho > 5 && newBlock.alto > 5) {
+            const { error } = await supabase.from('construcciones').insert([newBlock]);
+            if (!error) socket.emit('newBlock', newBlock);
+        }
+    };
+
+    // --- RENDERIZADO ---
+    function render() {
+        ctx.clearRect(0, 0, canvas.width, canvas.height);
+        blocks.forEach(b => {
+            ctx.fillStyle = b.color || '#3498db';
+            ctx.fillRect(b.x, b.y, b.ancho, b.alto);
+            ctx.fillStyle = "white";
+            ctx.font = "10px Arial";
+            ctx.fillText("Bloque", b.x, b.y - 5);
+        });
+    }
+
+    socket.on('initBlocks', (data) => { blocks = data; render(); });
+    socket.on('addBlock', (b) => { blocks.push(b); render(); });
+</script>
+</body>
+</html>
